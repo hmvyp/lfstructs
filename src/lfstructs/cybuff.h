@@ -48,13 +48,14 @@ as the name is changed.
 
  ToDo:
 
- 1) relax atomic loads.
+ 1) relax some atomic loads.
  2) implement exclude operation (by index returned by put()
 
-     Exclude operation shall replaces a pointer in the buffer by NULL pointer.
+     Exclude operation shall replace a pointer in the buffer by NULL pointer.
      The caller is responsible for eliminating ABA on the pointer, i.e.
      he(she) shall guarantee that the data pointer was not re-inserted
      after it insertion at the given index).
+ 3) Allow to align counters to cacheline to prevent ll/sc false negatives
 
 */
 
@@ -81,9 +82,7 @@ struct atomic_cell{
 template<typename data_t, unsigned size_magnitude>
 class CircularBuffer {
     static_assert((alignof(data_t) > 1) , "Data type shall be aligned by 2 or greater" );
-public:
     typedef uintptr_t record_t; // buffer element type (return value of get())
-protected:
     typedef ans::atomic<record_t> arecord_t;
     typedef size_t count_t;
     typedef ans::atomic<count_t> acount_t;
@@ -118,17 +117,25 @@ protected:
 public:
 
     enum {
-        ERROR_IDX_VALUE = std::numeric_limits<count_t>::max() - 1
+        BUFFER_OVERRUN = std::numeric_limits<count_t>::max() - 1,
+        IMPOSSIBLE_VALUE = BUFFER_OVERRUN -1
+    };
+
+    class get_result_t{
+        record_t data;
+    public:
+        get_result_t(record_t data){this->data = data;} // ctor
+
+        data_t* ptr(){
+            return ((data & 1) != 0)
+                    ? (data_t*) (data & (record_t) -2)  // set last bit to zero
+                    : NULL; // empty case
+        }
+
+        bool empty(){return (data & 1) == 0;}
     };
 
     constexpr CircularBuffer(): wcount(0), rcount(0){}
-
-    static data_t* record2pointer(record_t x) {
-        return (data_t*) (x & (record_t) -2); // set last bit to zero
-    }
-
-    static bool is_record_valid(record_t x){return (x & 1) != 0;}
-
 
     count_t
     put(data_t* pd){
@@ -136,11 +143,14 @@ public:
         record_t push_it = pointer2record(pd);
 
         for (;;) {
-            count_t w = ans::atomic_load(&wcount);
-            count_t r = ans::atomic_load(&rcount);
+            // the order of these 2 loads matters
+            // (otherwise false overrun may be reported)
+            count_t w = ans::atomic_load(&wcount); // can be relaxed
+            count_t r = ans::atomic_load(&rcount); // can NOT be relaxed (false
+                                        // overrun if reordered with previoyus)
 
             if (w - r >= bufsize) {
-                return ERROR_IDX_VALUE; // buffer overrun
+                return BUFFER_OVERRUN; // buffer overrun
             }
 
             count_t wx = count2idx(w); // current writer's index
@@ -151,7 +161,7 @@ public:
             if (v & 1) {
                 // if the record already contains valid data (not a tag) then
                 // try to complete rival's operation (increment the counter):
-                ans::atomic_compare_exchange_strong(&wcount, &w, w + 1);
+                ans::atomic_compare_exchange_strong(&wcount, &w, w + 1); // can be weakened
                 // and then try again from the beginning:
                 continue;
             }
@@ -163,7 +173,7 @@ public:
                         push_it)) {
                     // if the record has been changed since 1st atomic load:
                     // try to complete rival's operation (increment the counter):
-                    ans::atomic_compare_exchange_strong(&wcount, &w, w + 1);
+                    ans::atomic_compare_exchange_strong(&wcount, &w, w + 1); // can be weakened
                     // and then try again from the beginning:
                     continue;
                 }
@@ -171,10 +181,13 @@ public:
 
             // Record inserted successfully. Try to increment the counter:
             ans::atomic_compare_exchange_strong(&wcount, &w, w + 1);
-            // don't check cas result (failure means the operation is completed by a rival)
+            // don't check cas result: failure means the operation is completed by a rival
+            // The cas can be also  weakened (on false negative just leave
+            // the operation incompleted )
+
             return wx; // Ok
         }
-        return ERROR_IDX_VALUE; // unreachable code (calm compiler warning)
+        return IMPOSSIBLE_VALUE; // unreachable code (calm compiler warning)
     }
 
     size_t
@@ -186,12 +199,12 @@ public:
 
     // get() function for use in single reader thread.
     // Use is_record_valid() and record2pointer() to deal with data returned
-    record_t
+    get_result_t
     get(){
         count_t w = ans::atomic_load(&wcount);
         count_t r = ans::atomic_load(&rcount);
         if(w==r){ // if no data available
-            return 0; // invalid data; check it with is_record_valid()
+            return get_result_t(0); // invalid data; check it with is_record_valid()
             // to distinguish from regular data pointer
         }
 
@@ -204,7 +217,7 @@ public:
         ans::atomic_store(parecord, mkTag(r + bufsize));
         ans::atomic_store(&rcount, r+1); // increment reader's index
 
-        return res;
+        return get_result_t(res);
     }
 };
 

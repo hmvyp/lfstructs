@@ -80,7 +80,6 @@ struct Test1
 
 
     typedef CircularBuffer<Data, size_magnitude> BufType;
-    typedef typename BufType::record_t record_t;
 
     volatile unsigned send_count = 0;
     int active_producers = 0;
@@ -98,7 +97,7 @@ struct Test1
             for(unsigned i=0; i != num_of_steps; ++i){
                 Data* d = new Data(send_count++);
                 std::cout << "Thread" << index << ": to put data: " << send_count << std::endl;
-                while(buf.put(d) == BufType::ERROR_IDX_VALUE){
+                while(buf.put(d) == BufType::BUFFER_OVERRUN){
                     std::cout << "Thread: "<< index << " overrun. yield"<< std::endl;
                     rl::yield(1, $);
                 }
@@ -106,13 +105,13 @@ struct Test1
             }
         }else{// consumer:
             for(unsigned i=0; i != num_of_steps * num_of_producers; ++i){
-                record_t res;
-                while(!BufType::is_record_valid(res = buf.get())){
-                  std::cout << "consumer: no data code: "+ res << std::endl;
+                auto res = buf.get();
+                for(; res.empty(); res= buf.get()){
+                  std::cout << "consumer: no data " << std::endl;
                   rl::yield(1, $);
                 }
-                Data* d = BufType::record2pointer(res);
-                std::cout << " consumer: received data: " << d->data << std::endl;
+                Data* d = res.ptr();
+                std::cout << " consumer: data received: " << d->data << std::endl;
 
                 delete d;
             }
