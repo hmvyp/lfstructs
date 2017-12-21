@@ -1,7 +1,7 @@
 /*
 DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE Version 2
 
-Copyright (C) 2004 hmvyp
+Copyright (C) 2017 hmvyp
 
 Everyone is permitted to copy and distribute verbatim or modified
 copies of this software, and changing it is allowed as long
