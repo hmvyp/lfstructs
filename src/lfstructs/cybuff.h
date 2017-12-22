@@ -48,14 +48,14 @@ as the name is changed.
 
  ToDo:
 
- 1) relax some atomic loads.
- 2) implement exclude operation (by index returned by put()
+ 1) implement exclude operation (by index returned by put()
 
      Exclude operation shall replace a pointer in the buffer by NULL pointer.
      The caller is responsible for eliminating ABA on the pointer, i.e.
      he(she) shall guarantee that the data pointer was not re-inserted
      after it insertion at the given index).
- 3) Allow to align counters to cacheline to prevent ll/sc false negatives
+
+ 2) Allow to align counters to cacheline to prevent ll/sc false negatives
 
 */
 
@@ -101,7 +101,7 @@ class CircularBuffer {
     }
     static record_t mkTag(count_t c) {
         return (c << 2) | 2;
-    } // |1 to distinguish from initial zero
+    } // |2 to distinguish from initial zero
 
     static record_t pointer2record(data_t* pd) {
         return ((record_t) pd) + 1; // +1 to distinguish data from tag
@@ -142,12 +142,12 @@ public:
 
         record_t push_it = pointer2record(pd);
 
+        count_t w = ans::atomic_load(&wcount); // do not relax to prevent
+        // false overrun reporting if reordering wcount and rcount reads
+
         for (;;) {
-            // the order of these 2 loads matters
-            // (otherwise false overrun may be reported)
-            count_t w = ans::atomic_load(&wcount); // can be relaxed
-            count_t r = ans::atomic_load(&rcount); // can NOT be relaxed (false
-                                        // overrun if reordered with previoyus)
+            count_t r =
+                ans::atomic_load_explicit(&rcount, ans::memory_order_relaxed);
 
             if (w - r >= bufsize) {
                 return BUFFER_OVERRUN; // buffer overrun

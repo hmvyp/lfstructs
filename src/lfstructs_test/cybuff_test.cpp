@@ -30,6 +30,7 @@ namespace ans = rl; // redirect atomics from std to relacy
 
 namespace rl{
 //  add free atomic functions to relacy namespace:
+
     template<typename T>
     T atomic_load(atomic<T>* pa) {
         return pa->load(ans::mo_seq_cst, $);
@@ -43,6 +44,11 @@ namespace rl{
     template<typename T>
     void atomic_store(atomic<T>* pa, T val){
         pa->store(val, ans::mo_seq_cst, $ );
+    }
+
+    template< class T >
+    T atomic_load_explicit(atomic<T>* pa, memory_order order, debug_info_param info ){
+        return pa->load(order, info);
     }
 }
 
