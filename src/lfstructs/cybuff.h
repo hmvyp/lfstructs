@@ -143,14 +143,20 @@ public:
         record_t push_it = pointer2record(pd);
 
         count_t w = ans::atomic_load(&wcount); // do not relax to prevent
-        // false overrun reporting if reordering wcount and rcount reads
+        // 1) false overrun reporting if reordering wcount and rcount reads
+        // 2) reordering with subsequent record load (by index calculated from w)
+        //    I doubt, though, the 2nd reordering can really happen
+        //    with sec_cst (not acquire) record loading.
+        // Anyway, false overrun is sufficient reason not to relax wcount
+        // loading. Even acquire mo isn't adequate here since
+        // wcount and rcount are modified by different threads
 
         for (;;) {
             count_t r =
                 ans::atomic_load_explicit(&rcount, ans::memory_order_relaxed);
 
             if (w - r >= bufsize) {
-                return BUFFER_OVERRUN; // buffer overrun
+                return BUFFER_OVERRUN;
             }
 
             count_t wx = count2idx(w); // current writer's index
@@ -190,22 +196,25 @@ public:
         return IMPOSSIBLE_VALUE; // unreachable code (calm compiler warning)
     }
 
+    /**
+     * actually returns lower bound of current size
+     */
     size_t
     size() {
         count_t w = ans::atomic_load(&wcount);
-        count_t r = ans::atomic_load(&rcount);
-        return w - r;
+        count_t r = ans::atomic_load_explicit(&rcount, ans::memory_order_relaxed);
+        return (w - r < bufsize) ? w-r : 0; // i.e. check w-r<0 as signed ints
     }
 
     // get() function for use in single reader thread.
     // Use is_record_valid() and record2pointer() to deal with data returned
     get_result_t
     get(){
-        count_t w = ans::atomic_load(&wcount);
-        count_t r = ans::atomic_load(&rcount);
+        count_t w = ans::atomic_load(&wcount); // at least acquire mo
+        count_t r = ans::atomic_load_explicit(&rcount, ans::memory_order_relaxed);
         if(w==r){ // if no data available
-            return get_result_t(0); // invalid data; check it with is_record_valid()
-            // to distinguish from regular data pointer
+            return get_result_t(0); // empty data; check it with emty()
+            // to distinguish from data pointer
         }
 
         count_t ix = count2idx(r);
