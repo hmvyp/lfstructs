@@ -162,37 +162,37 @@ public:
             count_t wx = count2idx(w); // current writer's index
             arecord_t* parecord = &buf[wx].a; // ptr to record to write into
 
-            // read previous data from the record to write into:
-            record_t v =  ans::atomic_load(parecord);
-            if (v & 1) {
-                // if the record already contains valid data (not a tag) then
-                // try to complete rival's operation (increment the counter):
-                ans::atomic_compare_exchange_strong(&wcount, &w, w + 1); // can be weakened
-                // and then try again from the beginning:
-                continue;
+            // read previous data from the record to write into
+            // (if buffer is initialized by tags, the load isn't needed)
+            record_t expected =  ans::atomic_load_explicit(
+                    parecord,
+                    ans::memory_order_relaxed
+            );
+
+            expected = (expected == 0) ?  // initial value?
+                    0 // leave it
+                    : mkTag(w); // calculate tag otherwise
+
+            // Strong CAS matters to prevent erroneous counter increment
+            // in false negative case:
+            if (ans::atomic_compare_exchange_strong(parecord, &expected,
+                    push_it)) {
+                // Record inserted successfully. Try to increment the counter
+                // don't check cas result: failure means the operation is completed by a rival
+                // The cas can be also  weakened (on false negative just leave
+                // the operation incompleted for future actors).
+                ans::atomic_compare_exchange_strong(&wcount, &w, w + 1);
+                return wx; // Ok
+            }else{ // CAS failure
+                // (due to rival's data or even future tag in the cell)
+                //  Try to increment the counter:
+                ans::atomic_compare_exchange_strong(&wcount, &w, w + 1);
+                // don't check cas result: failure means the operation is completed by a rival
+                // The cas can be also  weakened (on false negative just leave
+                // the operation incompleted for future actors)
             }
-
-            if ((v = mkTag(w)) // if tag matches the current counter
-            || (v == 0)  // or initial state found (zeroed memory)
-                    ) {
-                if (!ans::atomic_compare_exchange_strong(parecord, &v,
-                        push_it)) {
-                    // if the record has been changed since 1st atomic load:
-                    // try to complete rival's operation (increment the counter):
-                    ans::atomic_compare_exchange_strong(&wcount, &w, w + 1); // can be weakened
-                    // and then try again from the beginning:
-                    continue;
-                }
-            }
-
-            // Record inserted successfully. Try to increment the counter:
-            ans::atomic_compare_exchange_strong(&wcount, &w, w + 1);
-            // don't check cas result: failure means the operation is completed by a rival
-            // The cas can be also  weakened (on false negative just leave
-            // the operation incompleted )
-
-            return wx; // Ok
-        }
+            // (try again)
+        } // loop
         return IMPOSSIBLE_VALUE; // unreachable code (calm compiler warning)
     }
 
