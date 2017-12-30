@@ -91,16 +91,17 @@ class CircularBuffer {
     // (reserve some index range for error codes when returning a buffer index):
     static_assert(size_magnitude < sizeof(count_t)*8 - 1, "Circular buffer too large");
 
-    enum {
-        bufsize = 1 << size_magnitude,
-        idx_mask = bufsize - 1,
-    };
+
+    static const count_t  bufsize = 1 << size_magnitude;
+    static const count_t idx_mask = bufsize - 1;
 
     static count_t count2idx(count_t c) {
         return c & idx_mask;
     }
     static record_t mkTag(count_t c) {
-        return (c << 2) | 2;
+        //return (c << 2) | 2;
+        //tag value changes every buffer (for all cells the same):
+        return (c & ~idx_mask);
     } // |2 to distinguish from initial zero
 
     static record_t pointer2record(data_t* pd) {
@@ -169,9 +170,7 @@ public:
                     ans::memory_order_relaxed
             );
 
-            expected = (expected == 0) ?  // initial value?
-                    0 // leave it
-                    : mkTag(w); // calculate tag otherwise
+            expected =  mkTag(w);
 
             // Strong CAS matters to prevent erroneous counter increment
             // in false negative case:

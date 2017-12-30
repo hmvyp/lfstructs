@@ -64,6 +64,7 @@ struct Data{
 };
 
 static unsigned iter_count =0;
+static unsigned error_count = 0;
 
 template<
   size_t size_magnitude,
@@ -86,13 +87,17 @@ struct Test1
 
 
     typedef CircularBuffer<Data, size_magnitude> BufType;
+    
+    enum{ num_of_msgs = num_of_producers * num_of_steps};
 
     volatile unsigned send_count = 0;
     int active_producers = 0;
 
     BufType buf;
+    
+    bool receive_confirmations[num_of_msgs];
 
-    Test1(){
+    Test1(): receive_confirmations{0}{
         std::cout << std::endl << "Iteration No: " <<   iter_count++ << std::endl;
     }
 
@@ -101,26 +106,43 @@ struct Test1
         if (index<num_of_producers){ // if producer thread
 
             for(unsigned i=0; i != num_of_steps; ++i){
-                Data* d = new Data(send_count++);
-                std::cout << "Thread" << index << ": to put data: " << send_count << std::endl;
+                Data* d = new Data((send_count++));//, send_count*9/10));
+                //std::cout << "Thread" << index << ": to put data: " << send_count << std::endl;
                 while(buf.put(d) == BufType::BUFFER_OVERRUN){
-                    std::cout << "Thread: "<< index << " overrun. yield"<< std::endl;
+                    //std::cout << "Thread: "<< index << " overrun. yield"<< std::endl;
                     rl::yield(1, $);
                 }
-                std::cout << "Data is send thread "<< index << std::endl;
+                //std::cout << "Data is send thread "<< index << std::endl;
             }
         }else{// consumer:
-            for(unsigned i=0; i != num_of_steps * num_of_producers; ++i){
+            for(unsigned i=0; i != num_of_msgs; ++i){
                 auto res = buf.get();
                 for(; res.empty(); res= buf.get()){
-                  std::cout << "consumer: no data " << std::endl;
+                  //std::cout << "consumer: no data " << std::endl;
                   rl::yield(1, $);
                 }
                 Data* d = res.ptr();
-                std::cout << " consumer: data received: " << d->data << std::endl;
+                //std::cout << " consumer: data received: " << d->data << std::endl;
+                receive_confirmations[d->data] = true;
 
                 delete d;
             }
+            
+            bool missed= false;
+            for(unsigned i; i < num_of_msgs; ++ i){
+                if(!receive_confirmations[i]){
+                    if(!missed){
+                        missed= true;
+                        ++error_count;
+                        std::cout << std::endl << "Missed messages" << std::endl;
+                    }
+                    std::cout << "missed message No " << i << std::endl;
+                }
+            }
+            
+            std::cout 
+               << (missed? "----------------------" : " all messages received") 
+               << std::endl;
         }// ...consumer
     }
 };
@@ -154,6 +176,9 @@ void test(){
         20  // num of steps
         > >(params);
     }
+    
+    std::cout << std::endl 
+            << "Custom invariant errors: " << error_count << std::endl;
 }
 
 int main(){
