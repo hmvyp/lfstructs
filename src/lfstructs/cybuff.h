@@ -163,14 +163,7 @@ public:
             count_t wx = count2idx(w); // current writer's index
             arecord_t* parecord = &buf[wx].a; // ptr to record to write into
 
-            // read previous data from the record to write into
-            // (if buffer is initialized by tags, the load isn't needed)
-            record_t expected =  ans::atomic_load_explicit(
-                    parecord,
-                    ans::memory_order_relaxed
-            );
-
-            expected =  mkTag(w);
+            record_t expected =  mkTag(w);
 
             // Strong CAS matters to prevent erroneous counter increment
             // in false negative case:
