@@ -52,6 +52,13 @@ namespace rl{
     }
 }
 
+int max_cybuff_loop_count = 0;
+
+#define LFSTRUCTS_DEBUG 1
+#define LFSTR_DBG_REPORT_LOOP_COUNT(count) \
+    if(count > max_cybuff_loop_count){max_cybuff_loop_count = count;}
+
+
 #include <lfstructs/cybuff.h>
 
 using namespace lfstructs;
@@ -98,7 +105,7 @@ struct Test1
     bool receive_confirmations[num_of_msgs];
 
     Test1(): receive_confirmations{0}{
-        std::cout << std::endl << "Iteration No: " <<   iter_count++ << std::endl;
+        // std::cout << std::endl << "Iteration No: " <<   iter_count++ << std::endl;
     }
 
     void thread(unsigned index)
@@ -140,9 +147,11 @@ struct Test1
                 }
             }
             
-            std::cout 
-               << (missed? "----------------------" : " all messages received") 
-               << std::endl;
+            if(missed){
+                std::cout
+                   << "----some messages missed -----------"
+                   << std::endl;
+            }
         }// ...consumer
     }
 };
@@ -160,10 +169,18 @@ void test(){
         rl::simulate<Test1<
         3, // bufsize magnitude
         2, // 2 producers
-        20  // num of steps
+        50 // 20  // num of steps
         > >(params);
         //--------------------------------------------------
     }
+    std::cout << std::endl
+            << "Custom invariant errors: " << error_count
+            << " Max loop count: " << max_cybuff_loop_count
+            << std::endl << "------------------"<< std::endl<< std::endl<< std::endl;
+
+    error_count = 0;
+    max_cybuff_loop_count = 0;
+
     {
         rl::test_params params;
         params.search_type= rl::sched_random;
@@ -173,12 +190,14 @@ void test(){
         rl::simulate<Test1<
         3, // bufsize magnitude
         8, //  producers
-        20  // num of steps
+        50  // num of steps
         > >(params);
     }
     
     std::cout << std::endl 
-            << "Custom invariant errors: " << error_count << std::endl;
+            << "Custom invariant errors: " << error_count
+            << " Max loop count: " << max_cybuff_loop_count
+            << std::endl << "------------------"<< std::endl<< std::endl<< std::endl;
 }
 
 int main(){

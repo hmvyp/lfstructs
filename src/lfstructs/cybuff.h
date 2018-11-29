@@ -70,6 +70,16 @@ as the name is changed.
     namespace ans = std;
 #endif
 
+#ifdef LFSTRUCTS_DEBUG
+#   define LFSTR_DBG(text) text
+#   ifndef LFSTR_DBG_REPORT_LOOP_COUNT
+#       define LFSTR_DBG_REPORT_LOOP_COUNT(count)
+#   endif
+#else
+#   define LFSTR_DBG(text)
+#   define LFSTR_DBG_REPORT_LOOP_COUNT(count)
+#endif
+
 namespace lfstructs {
 
 // zero-initialized atomic wrapper:
@@ -143,7 +153,7 @@ public:
 
         record_t push_it = pointer2record(pd);
 
-        count_t w = ans::atomic_load(&wcount); // do not relax to prevent
+        // do not relax wcount loading to prevent
         // 1) false overrun reporting if reordering wcount and rcount reads
         // 2) reordering with subsequent record load (by index calculated from w)
         //    I doubt, though, the 2nd reordering can really happen
@@ -151,10 +161,14 @@ public:
         // Anyway, false overrun is sufficient reason not to relax wcount
         // loading. Even acquire mo isn't adequate here since
         // wcount and rcount are modified by different threads
+        count_t w = ans::atomic_load(&wcount);
 
-        for (;;) {
+        // while(1) loop. Loop counter provided for debug mode:
+        for (LFSTR_DBG(int dbg_count = 0) ; ; LFSTR_DBG(++dbg_count)) {
             count_t r =
                 ans::atomic_load_explicit(&rcount, ans::memory_order_relaxed);
+
+            LFSTR_DBG_REPORT_LOOP_COUNT(dbg_count);
 
             if (w - r >= bufsize) {
                 return BUFFER_OVERRUN;
@@ -178,7 +192,11 @@ public:
             }else{ // CAS failure
                 // (due to rival's data or even future tag in the cell)
                 //  Try to increment the counter:
-                ans::atomic_compare_exchange_strong(&wcount, &w, w + 1);
+
+                if(ans::atomic_compare_exchange_strong(&wcount, &w, w + 1)){
+                    ++w;
+                }
+
                 // don't check cas result: failure means the operation is completed by a rival
                 // The cas can be also  weakened (on false negative just leave
                 // the operation incompleted for future actors)
